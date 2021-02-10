@@ -1,8 +1,8 @@
 bl_info = {
     "name": "Codestyle",
     "author": "tin2tin",
-    "version": (1, 0),
-    "blender": (2, 82, 0),
+    "version": (1, 1),
+    "blender": (2, 92, 0),
     "location": "Text Editor > Sidebar > Codestyle",
     "description": "Runs pep8 stylechecks on current document",
     "warning": "Pycodestyle must be installed in your Blender Python folder with ex. pip",
@@ -10,16 +10,20 @@ bl_info = {
     "category": "Text Editor",
 }
 
+import bpy
+import os
+import subprocess
+import pip
+import tempfile
+import re
+from bpy.props import IntProperty, StringProperty
 
-import bpy, os, subprocess, pip
 try:
     import pycodestyle
 except ImportError:
     pybin = bpy.app.binary_path_python
     subprocess.check_call([pybin, '-m', 'pip', 'install', 'pycodestyle'])
-
-import re
-from bpy.props import PointerProperty, IntProperty, StringProperty, BoolProperty
+    import pycodestyle
 
 ignores = {
     'pep8': [
@@ -49,10 +53,7 @@ class StringReport(pycodestyle.StandardReport):
                     'row': self.line_offset + line_number, 'col': offset + 1,
                     'code': code, 'text': text,
                 })
-                if line_number > len(self.lines):
-                    line = ''
-                else:
-                    line = self.lines[line_number - 1]
+                line = '' if line_number > len(self.lines) else self.lines[line_number - 1]
                 err_strings.append(line.rstrip())
                 err_strings.append(re.sub(r'\S', ' ', line[:offset]) + '^')
         return err_strings
@@ -83,7 +84,6 @@ def getfunc(file, context):
         failures.append('')
 
     for l in failures:
-        print(l)
         if l.find(':') == 1:
             start = 'py:'
             end = ': '
@@ -106,13 +106,13 @@ class TEXT_OT_codestyle_button(bpy.types.Operator):
         return context.active_object is not None
 
     def execute(self, context):
-        old_filename = bpy.context.space_data.text.filepath
-        bpy.types.Scene.codestyle_name = old_filename
-        filename = bpy.utils.script_path_user() + "temp_codestyle.py"
-        bpy.ops.text.save_as(filepath=filename, check_existing=False)
-        bpy.types.Scene.codestyle = getfunc(filename, context)
-        os.remove(filename)
-        bpy.context.space_data.text.filepath = old_filename
+        global codestyle
+        context.scene.codestyle_name = context.space_data.text.filepath
+        temp_file = os.path.join(tempfile.gettempdir(), "temp_codestyle.py")
+        bpy.ops.text.save_as(filepath=temp_file, check_existing=False)
+        codestyle = getfunc(temp_file, context)
+        os.remove(temp_file)
+        context.space_data.text.filepath = context.scene.codestyle_name
         return {'FINISHED'}
 
 
@@ -128,12 +128,10 @@ class TEXT_PT_show_codestyle(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        st = context.space_data
-        layout.use_property_split = False
+        text = context.space_data.text
         layout.operator("text.codestyle_button")
-        print(bpy.context.space_data.text.filepath)
-        if bpy.types.Scene.codestyle_name == bpy.context.space_data.text.filepath:
-            items = bpy.types.Scene.codestyle
+        if context.scene.codestyle_name == text.filepath:
+            items = codestyle
             for it in items:
                 cname = it[0]
                 cline = it[1]
@@ -162,13 +160,13 @@ class TEXT_OT_codestyle_jump(bpy.types.Operator):
         return context.active_object is not None
 
     def execute(self, context):
-        bpy.context.space_data.show_line_highlight = True
+        context.space_data.show_line_highlight = True
         line = self.line
         character = self.character
         print(character)
         if line > 0:
             bpy.ops.text.jump(line=line)
-            curtxt = bpy.context.space_data.text.name
+            curtxt = context.space_data.text.name
             bpy.data.texts[curtxt].select_set(line - 1, character, line - 1, character + 1)
         self.line = -1
 
@@ -179,23 +177,19 @@ classes = (
     TEXT_PT_show_codestyle,
     TEXT_OT_codestyle_jump,
     TEXT_OT_codestyle_button,
-    )
+)
 
 
 def register():
-
-    for i in classes:
-        bpy.utils.register_class(i)
-        bpy.types.Scene.codestyle = bpy.props.StringProperty()
-        bpy.types.Scene.codestyle_name = bpy.props.StringProperty()
+    for c in classes:
+        bpy.utils.register_class(c)
+    bpy.types.Scene.codestyle_name = bpy.props.StringProperty()
 
 
 def unregister():
-
-    for i in classes:
-        bpy.utils.unregister_class(i)
-        del bpy.types.Scene.codestyle
-        del bpy.types.Scene.codestyle_name
+    for c in classes:
+        bpy.utils.unregister_class(c)
+    del bpy.types.Scene.codestyle_name
 
 
 if __name__ == "__main__":
